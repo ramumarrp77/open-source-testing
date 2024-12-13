@@ -1,82 +1,46 @@
 import os
-import logging
-from typing import Tuple, Dict
-from langchain_openai import ChatOpenAI
-from langgraph.graph import StateGraph, END, START
-from langgraph.schema import TypedDict
-from langchain.schema import Document
+import PyPDF2
+import numpy as np
+from langchain.embeddings import OpenAIEmbeddings
+from langchain.vectorstores import Chroma
+from langchain.llms import OpenAI
+from langgraph import StateGraph
+from typing import List, Dict
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
+# Initialize global variables
+embeddings_store = Chroma(persist_directory="./embeddings")
 
-class GraphState(TypedDict):
-    error: str
-    messages: list
-    generation: str
-    iterations: int
-
-# Define the nodes for the LangGraph workflow
-
-def retrieve_requirements(state: GraphState) -> GraphState:
-    logging.info('Retrieving requirements...')
-    requirements = state['messages'][-1]  # Get the last message
-    return {'error': '', 'messages': state['messages'], 'generation': requirements, 'iterations': state['iterations']}
+def load_pdf(uploaded_file) -> str:
+    """Load PDF file and extract text."""
+    pdf_reader = PyPDF2.PdfReader(uploaded_file)
+    text = ""
+    for page in pdf_reader.pages:
+        text += page.extract_text() + '\n'
+    return text
 
 
-def generate_code(state: GraphState) -> GraphState:
-    logging.info('Generating code...')
-    requirements = state['generation']
-    # Use OpenAI to generate code based on requirements
-    llm = ChatOpenAI(model='gpt-4', temperature=0)
-    response = llm.invoke({'messages': [('user', requirements)]})
-    code = response['content']
-    return {'error': '', 'messages': state['messages'], 'generation': code, 'iterations': state['iterations']}
+def generate_embeddings(pdf_text: str) -> None:
+    """Generate and store embeddings for the given PDF text."""
+    embeddings = OpenAIEmbeddings()
+    embedding_vector = embeddings.embed_query(pdf_text)
+    embeddings_store.add_texts([pdf_text], [embedding_vector])
+    embeddings_store.persist()
 
 
-def document_code(state: GraphState) -> GraphState:
-    logging.info('Documenting code...')
-    code = state['generation']
-    documentation = f'"""
-Generated Code:
-{code}
-"""'
-    return {'error': '', 'messages': state['messages'], 'generation': documentation, 'iterations': state['iterations']}
+def search_documents(query: str) -> List[str]:
+    """Search for relevant documents based on the query."""
+    results = embeddings_store.similarity_search(query)
+    return [result.page_content for result in results]
 
 
-def explain_code(state: GraphState) -> GraphState:
-    logging.info('Explaining code...')
-    code = state['generation']
-    explanation = f'This code does the following: {code}'  # Simplified explanation
-    return {'error': '', 'messages': state['messages'], 'generation': explanation, 'iterations': state['iterations']}
+def generate_response(query: str) -> str:
+    """Generate a response using the language model based on the query and retrieved documents."""
+    llm = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+    retrieved_docs = search_documents(query)
+    context = '\n'.join(retrieved_docs)
+    response = llm(f"Based on the following context, answer the question: {query}\nContext: {context}")
+    return response
 
-# Create the LangGraph workflow
-workflow = StateGraph(GraphState)
-workflow.add_node('retrieve_requirements', retrieve_requirements)
-workflow.add_node('generate_code', generate_code)
-workflow.add_node('document_code', document_code)
-workflow.add_node('explain_code', explain_code)
-
-# Define the edges
-workflow.add_edge(START, 'retrieve_requirements')
-workflow.add_edge('retrieve_requirements', 'generate_code')
-workflow.add_edge('generate_code', 'document_code')
-workflow.add_edge('document_code', 'explain_code')
-workflow.add_edge('explain_code', END)
-
-# Compile the application
-app = workflow.compile()
-
-# Function to generate code based on user input
-
-def generate_code(user_input: str, openai_key: str) -> Tuple[str, str, str]:
-    os.environ['OPENAI_API_KEY'] = openai_key
-    inputs = {'messages': [user_input], 'error': '', 'generation': '', 'iterations': 0}
-    output = app.stream(inputs)
-    code = ''
-    documentation = ''
-    explanation = ''
-    for result in output:
-        code = result['generation'] if 'generation' in result else code
-        documentation = result['generation'] if 'generation' in result else documentation
-        explanation = result['generation'] if 'generation' in result else explanation
-    return code, documentation, explanation
+# Define the LangGraph workflow
+workflow = StateGraph()
+# Add nodes and edges as needed for the LangGraph implementation.

@@ -1,25 +1,40 @@
 import streamlit as st
-from backend import generate_code, get_openai_key
+import os
+from backend import load_pdf, generate_embeddings, search_documents, generate_response
+
+# Streamlit UI
+st.title("LangGraph PDF-Based RAG Agent")
 
 # Sidebar for OpenAI API Key
-st.sidebar.header('Settings')
-openai_key = st.sidebar.text_input('OpenAI API Key', type='password')
+openai_api_key = st.sidebar.text_input("Enter your OpenAI API Key:")
 
-# Main application title
-st.title('Code Generation Assistant')
+# PDF Upload
+uploaded_files = st.file_uploader("Upload PDF files", type=['pdf'], accept_multiple_files=True)
 
-# User input for requirements
-user_input = st.text_area('Enter your programming requirements:')
+if uploaded_files:
+    for uploaded_file in uploaded_files:
+        # Load PDF
+        pdf_text = load_pdf(uploaded_file)
+        st.write(f"Loaded {uploaded_file.name}")
 
-if st.button('Generate Code'):
-    if openai_key:
-        # Call the backend function to generate code
-        code, documentation, explanation = generate_code(user_input, openai_key)
-        st.subheader('Generated Code')
-        st.code(code, language='python')
-        st.subheader('Documentation')
-        st.write(documentation)
-        st.subheader('Explanation')
-        st.write(explanation)
-    else:
-        st.error('Please enter your OpenAI API Key.')
+        # Generate embeddings
+        embeddings = generate_embeddings(pdf_text)
+        st.write("Embeddings generated and stored.")
+
+# Query Input
+query = st.text_input("Enter your query:")
+
+if st.button("Search"):
+    if query:
+        # Search documents
+        results = search_documents(query)
+        st.write("Search Results:")
+        for result in results:
+            st.write(result)
+
+# Response Generation
+if st.button("Generate Response"):
+    if query:
+        response = generate_response(query)
+        st.write("Response:")
+        st.write(response)
